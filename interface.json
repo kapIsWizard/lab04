@@ -1,0 +1,47 @@
+{
+  "protocol": "weather_station",
+  "package": "generated.protocol",
+  "byte_order": "big",
+  "messages": [
+    {
+      "name": "SensorReading",
+      "id": 1,
+      "description": "Single measurement sent by a weather station sensor.",
+      "fields": [
+        { "name": "station_id", "type": "uint16" },
+        { "name": "temperature_c", "type": "float32" },
+        { "name": "humidity_percent", "type": "uint8" },
+        { "name": "wind_speed_mps", "type": "float32" },
+        { "name": "status", "type": "string" }
+      ]
+    },
+    {
+      "name": "ForecastRequest",
+      "id": 2,
+      "description": "Client request for a short forecast for one station.",
+      "fields": [
+        { "name": "station_id", "type": "uint16" },
+        { "name": "hours", "type": "uint8" }
+      ]
+    },
+    {
+      "name": "ForecastResponse",
+      "id": 3,
+      "description": "Server answer with a compact text forecast.",
+      "fields": [
+        { "name": "station_id", "type": "uint16" },
+        { "name": "forecast", "type": "string" },
+        { "name": "risk_level", "type": "uint8" }
+      ]
+    },
+    {
+      "name": "ErrorMessage",
+      "id": 255,
+      "description": "Generic protocol error.",
+      "fields": [
+        { "name": "code", "type": "uint16" },
+        { "name": "message", "type": "string" }
+      ]
+    }
+  ]
+}

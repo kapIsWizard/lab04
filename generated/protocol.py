@@ -1,0 +1,274 @@
+# This file was generated from interface.json. Do not edit it by hand.
+# To extend the protocol, update interface.json and rerun:
+#   python3 -m generator.generate
+
+from __future__ import annotations
+
+import socket
+import struct
+from dataclasses import dataclass
+from typing import Any, Callable
+
+
+PROTOCOL_NAME = "weather_station"
+BYTE_ORDER = ">"
+MESSAGE_HEADER_SIZE = 2
+FRAME_HEADER_SIZE = 4
+MAX_FRAME_SIZE = 1_048_576
+
+
+class ProtocolError(ValueError):
+    """Raised when a binary frame does not match the generated protocol."""
+
+
+@dataclass(frozen=True)
+class SensorReading:
+    """Single measurement sent by a weather station sensor."""
+
+    station_id: int
+    temperature_c: float
+    humidity_percent: int
+    wind_speed_mps: float
+    status: str
+
+
+@dataclass(frozen=True)
+class ForecastRequest:
+    """Client request for a short forecast for one station."""
+
+    station_id: int
+    hours: int
+
+
+@dataclass(frozen=True)
+class ForecastResponse:
+    """Server answer with a compact text forecast."""
+
+    station_id: int
+    forecast: str
+    risk_level: int
+
+
+@dataclass(frozen=True)
+class ErrorMessage:
+    """Generic protocol error."""
+
+    code: int
+    message: str
+
+
+def _require_available(data: bytes, offset: int, size: int) -> None:
+    if offset + size > len(data):
+        raise ProtocolError("Unexpected end of payload.")
+
+
+def _write_struct(parts: list[bytes], fmt: str, value: Any) -> None:
+    parts.append(struct.pack(BYTE_ORDER + fmt, value))
+
+
+def _read_struct(data: bytes, offset: int, fmt: str) -> tuple[Any, int]:
+    size = struct.calcsize(BYTE_ORDER + fmt)
+    _require_available(data, offset, size)
+    return struct.unpack_from(BYTE_ORDER + fmt, data, offset)[0], offset + size
+
+
+def _write_string(parts: list[bytes], value: str) -> None:
+    encoded = value.encode("utf-8")
+    _write_bytes(parts, encoded)
+
+
+def _read_string(data: bytes, offset: int) -> tuple[str, int]:
+    raw, offset = _read_bytes(data, offset)
+    try:
+        return raw.decode("utf-8"), offset
+    except UnicodeDecodeError as exc:
+        raise ProtocolError("Invalid UTF-8 string field.") from exc
+
+
+def _write_bytes(parts: list[bytes], value: bytes) -> None:
+    if len(value) > 65535:
+        raise ProtocolError("Variable length field is too large.")
+    _write_struct(parts, "H", len(value))
+    parts.append(value)
+
+
+def _read_bytes(data: bytes, offset: int) -> tuple[bytes, int]:
+    length, offset = _read_struct(data, offset, "H")
+    _require_available(data, offset, length)
+    return data[offset : offset + length], offset + length
+
+
+def _write_bool(parts: list[bytes], value: bool) -> None:
+    _write_struct(parts, "?", value)
+
+
+def _read_bool(data: bytes, offset: int) -> tuple[bool, int]:
+    return _read_struct(data, offset, "?")
+
+
+# Primitive codec registry. To add a new JSON type, pair a writer and reader
+# here, then add the same type name in generator/schema.py.
+_CODECS: dict[str, tuple[Callable[[list[bytes], Any], None], Callable[[bytes, int], tuple[Any, int]]]] = {
+    "uint8": (lambda parts, value: _write_struct(parts, "B", value), lambda data, offset: _read_struct(data, offset, "B")),
+    "uint16": (lambda parts, value: _write_struct(parts, "H", value), lambda data, offset: _read_struct(data, offset, "H")),
+    "uint32": (lambda parts, value: _write_struct(parts, "I", value), lambda data, offset: _read_struct(data, offset, "I")),
+    "int32": (lambda parts, value: _write_struct(parts, "i", value), lambda data, offset: _read_struct(data, offset, "i")),
+    "float32": (lambda parts, value: _write_struct(parts, "f", value), lambda data, offset: _read_struct(data, offset, "f")),
+    "float64": (lambda parts, value: _write_struct(parts, "d", value), lambda data, offset: _read_struct(data, offset, "d")),
+    "bool": (_write_bool, _read_bool),
+    "string": (_write_string, _read_string),
+    "bytes": (_write_bytes, _read_bytes),
+}
+
+
+_MESSAGE_FIELDS: dict[type[Any], list[tuple[str, str]]] = {
+    SensorReading: [("station_id", "uint16"), ("temperature_c", "float32"), ("humidity_percent", "uint8"), ("wind_speed_mps", "float32"), ("status", "string")],
+    ForecastRequest: [("station_id", "uint16"), ("hours", "uint8")],
+    ForecastResponse: [("station_id", "uint16"), ("forecast", "string"), ("risk_level", "uint8")],
+    ErrorMessage: [("code", "uint16"), ("message", "string")],
+}
+
+_MESSAGE_IDS: dict[type[Any], int] = {
+    SensorReading: 1,
+    ForecastRequest: 2,
+    ForecastResponse: 3,
+    ErrorMessage: 255,
+}
+
+_MESSAGE_TYPES: dict[int, type[Any]] = {
+    1: SensorReading,
+    2: ForecastRequest,
+    3: ForecastResponse,
+    255: ErrorMessage,
+}
+
+
+def _serialize_fields(message: Any) -> bytes:
+    parts: list[bytes] = []
+    for field_name, field_type in _MESSAGE_FIELDS[type(message)]:
+        writer = _CODECS[field_type][0]
+        writer(parts, getattr(message, field_name))
+    return b"".join(parts)
+
+
+def _deserialize_fields(message_type: type[Any], payload: bytes, offset: int) -> Any:
+    values: dict[str, Any] = {}
+    for field_name, field_type in _MESSAGE_FIELDS[message_type]:
+        reader = _CODECS[field_type][1]
+        values[field_name], offset = reader(payload, offset)
+
+    if offset != len(payload):
+        raise ProtocolError("Payload has trailing bytes.")
+    return message_type(**values)
+
+
+def serialize_sensor_reading(message: SensorReading) -> bytes:
+    """Serialize SensorReading without a TCP frame header."""
+
+    return struct.pack(BYTE_ORDER + "H", 1) + _serialize_fields(message)
+
+
+def deserialize_sensor_reading(payload: bytes, offset: int = MESSAGE_HEADER_SIZE) -> SensorReading:
+    """Deserialize SensorReading from a payload that includes message id."""
+
+    return _deserialize_fields(SensorReading, payload, offset)
+
+
+def serialize_forecast_request(message: ForecastRequest) -> bytes:
+    """Serialize ForecastRequest without a TCP frame header."""
+
+    return struct.pack(BYTE_ORDER + "H", 2) + _serialize_fields(message)
+
+
+def deserialize_forecast_request(payload: bytes, offset: int = MESSAGE_HEADER_SIZE) -> ForecastRequest:
+    """Deserialize ForecastRequest from a payload that includes message id."""
+
+    return _deserialize_fields(ForecastRequest, payload, offset)
+
+
+def serialize_forecast_response(message: ForecastResponse) -> bytes:
+    """Serialize ForecastResponse without a TCP frame header."""
+
+    return struct.pack(BYTE_ORDER + "H", 3) + _serialize_fields(message)
+
+
+def deserialize_forecast_response(payload: bytes, offset: int = MESSAGE_HEADER_SIZE) -> ForecastResponse:
+    """Deserialize ForecastResponse from a payload that includes message id."""
+
+    return _deserialize_fields(ForecastResponse, payload, offset)
+
+
+def serialize_error_message(message: ErrorMessage) -> bytes:
+    """Serialize ErrorMessage without a TCP frame header."""
+
+    return struct.pack(BYTE_ORDER + "H", 255) + _serialize_fields(message)
+
+
+def deserialize_error_message(payload: bytes, offset: int = MESSAGE_HEADER_SIZE) -> ErrorMessage:
+    """Deserialize ErrorMessage from a payload that includes message id."""
+
+    return _deserialize_fields(ErrorMessage, payload, offset)
+
+
+def serialize_message(message: Any) -> bytes:
+    """Serialize any generated message into a binary payload."""
+
+    message_type = type(message)
+    if message_type not in _MESSAGE_IDS:
+        raise ProtocolError(f"Unsupported message type: {message_type.__name__}")
+    return struct.pack(BYTE_ORDER + "H", _MESSAGE_IDS[message_type]) + _serialize_fields(message)
+
+
+def deserialize_message(payload: bytes) -> Any:
+    """Deserialize a binary payload into the matching dataclass."""
+
+    _require_available(payload, 0, MESSAGE_HEADER_SIZE)
+    message_id, offset = _read_struct(payload, 0, "H")
+    message_type = _MESSAGE_TYPES.get(message_id)
+    if message_type is None:
+        raise ProtocolError(f"Unknown message id: {message_id}")
+    return _deserialize_fields(message_type, payload, offset)
+
+
+def pack_frame(message: Any) -> bytes:
+    """Add a length prefix so messages can be sent safely over TCP streams."""
+
+    payload = serialize_message(message)
+    if len(payload) > MAX_FRAME_SIZE:
+        raise ProtocolError("Frame is too large.")
+    return struct.pack(BYTE_ORDER + "I", len(payload)) + payload
+
+
+def _recv_exact(sock: socket.socket, size: int) -> bytes | None:
+    chunks: list[bytes] = []
+    remaining = size
+    while remaining:
+        chunk = sock.recv(remaining)
+        if not chunk:
+            return None
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
+def receive_message(sock: socket.socket) -> Any | None:
+    """Read one length-prefixed message from a TCP socket."""
+
+    header = _recv_exact(sock, FRAME_HEADER_SIZE)
+    if header is None:
+        return None
+
+    frame_size = struct.unpack(BYTE_ORDER + "I", header)[0]
+    if frame_size > MAX_FRAME_SIZE:
+        raise ProtocolError("Incoming frame is too large.")
+
+    payload = _recv_exact(sock, frame_size)
+    if payload is None:
+        return None
+    return deserialize_message(payload)
+
+
+def send_message(sock: socket.socket, message: Any) -> None:
+    """Send one generated message through a TCP socket."""
+
+    sock.sendall(pack_frame(message))
