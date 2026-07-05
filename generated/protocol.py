@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import socket
+import json
 import struct
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -30,6 +31,7 @@ class SensorReading:
     humidity_percent: int
     wind_speed_mps: float
     status: str
+    history: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -86,14 +88,14 @@ def _read_string(data: bytes, offset: int) -> tuple[str, int]:
 
 
 def _write_bytes(parts: list[bytes], value: bytes) -> None:
-    if len(value) > 65535:
+    if len(value) > MAX_FRAME_SIZE:
         raise ProtocolError("Variable length field is too large.")
-    _write_struct(parts, "H", len(value))
+    _write_struct(parts, "I", len(value))
     parts.append(value)
 
 
 def _read_bytes(data: bytes, offset: int) -> tuple[bytes, int]:
-    length, offset = _read_struct(data, offset, "H")
+    length, offset = _read_struct(data, offset, "I")
     _require_available(data, offset, length)
     return data[offset : offset + length], offset + length
 
@@ -106,23 +108,78 @@ def _read_bool(data: bytes, offset: int) -> tuple[bool, int]:
     return _read_struct(data, offset, "?")
 
 
-# Primitive codec registry. To add a new JSON type, pair a writer and reader
-# here, then add the same type name in generator/schema.py.
+def _write_json_value(parts: list[bytes], value: Any) -> None:
+    try:
+        encoded = json.dumps(
+            value,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ProtocolError("Value is not JSON serializable.") from exc
+    _write_bytes(parts, encoded)
+
+
+def _read_json_value(data: bytes, offset: int) -> tuple[Any, int]:
+    raw, offset = _read_bytes(data, offset)
+    try:
+        return json.loads(raw.decode("utf-8")), offset
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ProtocolError("Invalid JSON field.") from exc
+
+
+def _write_dictionary(parts: list[bytes], value: dict[str, Any]) -> None:
+    if not isinstance(value, dict):
+        raise ProtocolError("Dictionary field must be a dict.")
+    _write_json_value(parts, value)
+
+
+def _read_dictionary(data: bytes, offset: int) -> tuple[dict[str, Any], int]:
+    value, offset = _read_json_value(data, offset)
+    if not isinstance(value, dict):
+        raise ProtocolError("Dictionary field did not decode to a dict.")
+    return value, offset
+
+
+def _write_list(parts: list[bytes], value: list[Any]) -> None:
+    if not isinstance(value, list):
+        raise ProtocolError("List field must be a list.")
+    _write_json_value(parts, value)
+
+
+def _read_list(data: bytes, offset: int) -> tuple[list[Any], int]:
+    value, offset = _read_json_value(data, offset)
+    if not isinstance(value, list):
+        raise ProtocolError("List field did not decode to a list.")
+    return value, offset
+
+
+# Codec registry. To add a new JSON schema type, pair a writer and reader here,
+# then add the same type name in generator/schema.py.
 _CODECS: dict[str, tuple[Callable[[list[bytes], Any], None], Callable[[bytes, int], tuple[Any, int]]]] = {
+    "int8": (lambda parts, value: _write_struct(parts, "b", value), lambda data, offset: _read_struct(data, offset, "b")),
+    "int16": (lambda parts, value: _write_struct(parts, "h", value), lambda data, offset: _read_struct(data, offset, "h")),
     "uint8": (lambda parts, value: _write_struct(parts, "B", value), lambda data, offset: _read_struct(data, offset, "B")),
     "uint16": (lambda parts, value: _write_struct(parts, "H", value), lambda data, offset: _read_struct(data, offset, "H")),
     "uint32": (lambda parts, value: _write_struct(parts, "I", value), lambda data, offset: _read_struct(data, offset, "I")),
     "int32": (lambda parts, value: _write_struct(parts, "i", value), lambda data, offset: _read_struct(data, offset, "i")),
+    "uint64": (lambda parts, value: _write_struct(parts, "Q", value), lambda data, offset: _read_struct(data, offset, "Q")),
+    "int64": (lambda parts, value: _write_struct(parts, "q", value), lambda data, offset: _read_struct(data, offset, "q")),
     "float32": (lambda parts, value: _write_struct(parts, "f", value), lambda data, offset: _read_struct(data, offset, "f")),
     "float64": (lambda parts, value: _write_struct(parts, "d", value), lambda data, offset: _read_struct(data, offset, "d")),
     "bool": (_write_bool, _read_bool),
     "string": (_write_string, _read_string),
     "bytes": (_write_bytes, _read_bytes),
+    "dictionary": (_write_dictionary, _read_dictionary),
+    "dict": (_write_dictionary, _read_dictionary),
+    "list": (_write_list, _read_list),
+    "array": (_write_list, _read_list),
+    "any": (_write_json_value, _read_json_value),
 }
 
 
 _MESSAGE_FIELDS: dict[type[Any], list[tuple[str, str]]] = {
-    SensorReading: [("station_id", "uint16"), ("temperature_c", "float32"), ("humidity_percent", "uint8"), ("wind_speed_mps", "float32"), ("status", "string")],
+    SensorReading: [("station_id", "uint16"), ("temperature_c", "float32"), ("humidity_percent", "uint8"), ("wind_speed_mps", "float32"), ("status", "string"), ("history", "dictionary")],
     ForecastRequest: [("station_id", "uint16"), ("hours", "uint8")],
     ForecastResponse: [("station_id", "uint16"), ("forecast", "string"), ("risk_level", "uint8")],
     ErrorMessage: [("code", "uint16"), ("message", "string")],

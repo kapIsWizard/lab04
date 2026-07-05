@@ -24,6 +24,11 @@ class ProtocolTests(unittest.TestCase):
             humidity_percent=58,
             wind_speed_mps=4.5,
             status="OK",
+            history={
+                "samples": [18.1, 18.4, 18.75],
+                "flags": {"calibrated": True, "errors": []},
+                "note": None,
+            },
         )
 
         decoded = deserialize_message(serialize_message(message))
@@ -34,6 +39,20 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(decoded.humidity_percent, message.humidity_percent)
         self.assertAlmostEqual(decoded.wind_speed_mps, message.wind_speed_mps, places=5)
         self.assertEqual(decoded.status, message.status)
+        self.assertEqual(decoded.history, message.history)
+
+    def test_dictionary_field_must_be_a_dict(self) -> None:
+        message = SensorReading(
+            station_id=1,
+            temperature_c=20.0,
+            humidity_percent=50,
+            wind_speed_mps=2.0,
+            status="OK",
+            history=["not", "a", "dict"],  # type: ignore[arg-type]
+        )
+
+        with self.assertRaises(ProtocolError):
+            serialize_message(message)
 
     def test_socket_helpers_transfer_one_message(self) -> None:
         left, right = socket.socketpair()

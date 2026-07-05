@@ -30,6 +30,10 @@ def run_client(host: str, port: int) -> None:
             humidity_percent=64,
             wind_speed_mps=3.4,
             status="OK",
+            history={
+                "last_hour": [21.1, 21.3, 21.6],
+                "battery": {"percent": 88, "charging": False},
+            },
         )
         send_message(sock, reading)
         print(f"sent reading: {reading}")

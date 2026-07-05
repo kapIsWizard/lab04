@@ -45,7 +45,8 @@ def handle_message(connection: socket.socket, message: object) -> bool:
             f"temp={message.temperature_c:.1f}C "
             f"humidity={message.humidity_percent}% "
             f"wind={message.wind_speed_mps:.1f}m/s "
-            f"status={message.status}"
+            f"status={message.status} "
+            f"history={message.history}"
         )
         return True
 

@@ -26,18 +26,28 @@ class TypeSpec:
     python_type: str
 
 
-# Add new primitive types here first. The generated runtime also needs a codec
-# with the same name in templates/protocol.py.j2.
+# Add new field types here first. The generated runtime also needs a codec with
+# the same name in templates/protocol.py.j2. Dynamic JSON-backed types are useful
+# for nested data that should not require a dedicated message definition.
 TYPE_REGISTRY: dict[str, TypeSpec] = {
+    "int8": TypeSpec("int8", "int"),
+    "int16": TypeSpec("int16", "int"),
     "uint8": TypeSpec("uint8", "int"),
     "uint16": TypeSpec("uint16", "int"),
     "uint32": TypeSpec("uint32", "int"),
     "int32": TypeSpec("int32", "int"),
+    "uint64": TypeSpec("uint64", "int"),
+    "int64": TypeSpec("int64", "int"),
     "float32": TypeSpec("float32", "float"),
     "float64": TypeSpec("float64", "float"),
     "bool": TypeSpec("bool", "bool"),
     "string": TypeSpec("string", "str"),
     "bytes": TypeSpec("bytes", "bytes"),
+    "dictionary": TypeSpec("dictionary", "dict[str, Any]"),
+    "dict": TypeSpec("dict", "dict[str, Any]"),
+    "list": TypeSpec("list", "list[Any]"),
+    "array": TypeSpec("array", "list[Any]"),
+    "any": TypeSpec("any", "Any"),
 }
 
 

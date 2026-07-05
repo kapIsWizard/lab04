@@ -46,3 +46,7 @@ python3 examples/client.py --host 127.0.0.1 --port 9009
 To add a new message, edit `interface.json` and rerun the generator. To add a
 new primitive field type, register it in `generator/schema.py` and add a matching
 codec in `generator/templates/protocol.py.j2`.
+
+The generator also supports dynamic JSON-compatible fields: `dictionary`/`dict`,
+`list`/`array`, and `any`. These are useful for nested values such as histories,
+metadata, or settings that should not require a separate message class.
